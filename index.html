@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Chestnut Pan: scoring helper</title>
+<style>
+  body { margin:0; background:#2a211c; color:#f1e3c8; font-family: Georgia, serif; text-align:center; }
+  h1 { font-size:22px; margin:10px 0 2px; font-weight:normal; letter-spacing:2px; }
+  p { margin:2px; font-size:14px; opacity:.85; }
+  button { font-family:inherit; font-size:14px; padding:4px 12px; margin:3px; background:#c98a3e; border:0; border-radius:6px; color:#2a1608; cursor:pointer; }
+  input { font-family:inherit; font-size:14px; width:48px; padding:3px; background:#3a2c24; color:#f1e3c8; border:1px solid #6b5444; border-radius:4px; }
+  input[type=range] { width:180px; padding:0; vertical-align:middle; }
+  #timer { font-size:44px; letter-spacing:3px; margin:6px 0 2px; }
+  #timer.done { color:#ff8a4a; }
+  #heat { margin:10px auto 4px; }
+  #heatnote { display:inline-block; margin:6px 0 2px; padding:4px 12px; border-radius:6px; font-size:14px; border:2px solid transparent; }
+  #heatnote.cool { background:#2f3c46; border-color:#6a8aa0; }
+  #heatnote.good { background:#2f4430; border-color:#7fb27a; }
+  #heatnote.warm { background:#4a3c20; border-color:#d9a83e; }
+  #heatnote.hot { background:#5a2218; border-color:#ff6a4a; color:#ffe2d6; font-weight:bold; }
+  #grid { display:grid; grid-template-columns:repeat(4, 120px); gap:12px; justify-content:center; margin:12px auto; }
+  .cell { background:#3a2c24; border-radius:10px; padding:8px 4px; }
+  .nut { width:76px; height:60px; border-radius:50%; margin:6px auto 4px; cursor:pointer; position:relative; border:2px dashed #6b5444; box-sizing:border-box; }
+  .nut.scored { border:2px solid rgba(0,0,0,.35); }
+  .nut.split::after { content:''; position:absolute; left:14px; right:14px; top:24px; height:10px; border-radius:50%; background:#f3e2b0; box-shadow:inset 0 3px 0 #b99a5a; }
+  .name { font-size:12px; height:15px; }
+  .cell button { font-size:11px; padding:2px 8px; margin:1px; background:#5a4636; color:#f1e3c8; }
+  .cell button.on { background:#c98a3e; color:#2a1608; }
+  canvas { background:#3a2c24; border-radius:10px; max-width:96vw; }
+  #sum { margin:8px; font-size:15px; }
+</style>
+</head>
+<body>
+<h1>CHESTNUT PAN</h1>
+<p>Scoring helper. Click a chestnut to score it (pale to burnt). Then say if it split or stayed clean.</p>
+
+<div id="timer">20:00</div>
+<div>
+  roast for <input id="mins" type="number" value="20" min="1" max="90"> min
+  <button id="go">Start</button>
+  <button id="rst">Reset</button>
+</div>
+
+<div id="heat">
+  <label for="temp">pan heat</label>
+  <input id="temp" type="range" min="100" max="320" step="5" value="200">
+  <span id="tempval">200&deg;C</span>
+  <div><span id="heatnote" role="status" aria-live="polite"></span></div>
+</div>
+
+<div id="grid"></div>
+<div id="sum"></div>
+<button id="clear">Clear scores</button>
+
+<p style="margin-top:14px">Bean carries each scored nut to the plate and walks round the rock.</p>
+<canvas id="walk" width="640" height="110"></canvas>
+
+<script>
+var names = ['not scored', 'pale', 'golden', 'perfect', 'dark', 'burnt'];
+var colours = ['#4a3a30', '#ecdaaa', '#d6a862', '#a0602c', '#562e18', '#140c08'];
+var N = 12;
+var nuts = [];
+var grid = document.getElementById('grid');
+var sum = document.getElementById('sum');
+
+// ---------- the scoring grid ----------
+function makeGrid() {
+  for (var i = 0; i < N; i++) {
+    nuts.push({ score: 0, split: null });
+    var cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.innerHTML =
+      '<div class="nut" id="n' + i + '"></div>' +
+      '<div class="name" id="t' + i + '"></div>' +
+      '<button id="s' + i + '">split</button><button id="c' + i + '">clean</button>';
+    grid.appendChild(cell);
+    (function (k) {
+      document.getElementById('n' + k).addEventListener('click', function () {
+        nuts[k].score = (nuts[k].score + 1) % names.length;
+        if (nuts[k].score > 0) sendBean();
+        show();
+      });
+      document.getElementById('s' + k).addEventListener('click', function () {
+        nuts[k].split = (nuts[k].split === true) ? null : true; show();
+      });
+      document.getElementById('c' + k).addEventListener('click', function () {
+        nuts[k].split = (nuts[k].split === false) ? null : false; show();
+      });
+    })(i);
+  }
+}
+
+function show() {
+  var scored = 0, total = 0, splits = 0, cleans = 0;
+  for (var i = 0; i < N; i++) {
+    var n = nuts[i];
+    var el = document.getElementById('n' + i);
+    el.style.background = n.score ? colours[n.score] : 'transparent';
+    el.className = 'nut' + (n.score ? ' scored' : '') + (n.split === true ? ' split' : '');
+    document.getElementById('t' + i).textContent = names[n.score];
+    document.getElementById('s' + i).className = n.split === true ? 'on' : '';
+    document.getElementById('c' + i).className = n.split === false ? 'on' : '';
+    if (n.score) { scored++; total += n.score; }
+    if (n.split === true) splits++;
+    if (n.split === false) cleans++;
+  }
+  var txt = scored + ' of ' + N + ' scored';
+  if (scored) txt += ', average ' + names[Math.round(total / scored)];
+  txt += '. Split ' + splits + ', clean ' + cleans + '.';
+  sum.textContent = txt;
+}
+
+document.getElementById('clear').addEventListener('click', function () {
+  for (var i = 0; i < N; i++) { nuts[i].score = 0; nuts[i].split = null; }
+  show();
+});
+
+// ---------- the pan heat check ----------
+var tempEl = document.getElementById('temp');
+var tempVal = document.getElementById('tempval');
+var heatNote = document.getElementById('heatnote');
+var heatKey = '';
+
+// tells the four heat states apart
+function heatState(t) {
+  if (t < 160) return { key: 'cool', text: 'Too cool. The nuts will dry out instead of roasting.' };
+  if (t < 230) return { key: 'good', text: 'Good heat. Steady roast.' };
+  if (t < 270) return { key: 'warm', text: 'Getting hot. Turn it down a bit.' };
+  return { key: 'hot', text: 'Too hot! They will burn soon. Turn the pan down now.' };
+}
+function checkHeat() {
+  var t = parseInt(tempEl.value, 10);
+  if (!(t > 0)) t = 200;
+  tempVal.textContent = t + '\u00B0C';
+  var s = heatState(t);
+  // only rewrite the note when the state changes, so screen readers say it once
+  if (s.key !== heatKey) {
+    heatKey = s.key;
+    heatNote.className = s.key;
+    heatNote.textContent = s.text;
+  }
+}
+tempEl.addEventListener('input', checkHeat);
+tempEl.addEventListener('change', checkHeat);
+
+// ---------- the roast timer ----------
+var left = 20 * 60, running = false, lastTick = 0;
+var timerEl = document.getElementById('timer');
+var goBtn = document.getElementById('go');
+var minsEl = document.getElementById('mins');
+var ac = null;   // made on the Start click, because browsers keep sound shut until you click
+
+function fmt(s) {
+  s = Math.ceil(s);
+  var m = Math.floor(s / 60), r = s % 60;
+  return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+}
+function wakeAudio() {
+  try {
+    if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === 'suspended') ac.resume();
+  } catch (e) {}
+}
+function ding() {
+  try {
+    wakeAudio();
+    if (!ac) return;
+    for (var i = 0; i < 3; i++) {
+      var o = ac.createOscillator(), g = ac.createGain();
+      var t = ac.currentTime + 0.05 + i * 0.4;
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.15, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      o.connect(g); g.connect(ac.destination);
+      o.start(t);
+      o.stop(t + 0.32);
+    }
+  } catch (e) {}
+}
+function resetTimer() {
+  running = false;
+  var m = parseInt(minsEl.value, 10);
+  if (!(m > 0)) m = 20;
+  if (m > 90) m = 90;
+  minsEl.value = m;
+  left = m * 60;
+  goBtn.textContent = 'Start';
+  timerEl.className = '';
+  timerEl.textContent = fmt(left);
+}
+goBtn.addEventListener('click', function () {
+  wakeAudio();
+  if (left <= 0) resetTimer();
+  running = !running;
+  lastTick = performance.now();
+  goBtn.textContent = running ? 'Pause' : 'Start';
+});
+document.getElementById('rst').addEventListener('click', resetTimer);
+minsEl.addEventListener('change', resetTimer);
+
+// ---------- Bean walking round the rock ----------
+var wc = document.getElementById('walk');
+var w = wc.getContext('2d');
+var HOME_Y = 55;
+var rock = { x: 320, y: 55, r: 20 };
+var bean = { x: 50, y: HOME_Y };
+var PAN_X = 50, PLATE_X = 590;
+var goalX = PAN_X;
+var pending = 0;  // nuts waiting to be carried
+var face = 1;
+var detour = 0;   // 0 = none chosen yet, -1 = go over the top, 1 = go underneath
+
+function sendBean() {
+  if (pending < 12) pending++;
+}
+
+function walkStep(dt) {
+  var dist = Math.abs(goalX - bean.x);
+
+  // arrived: at the plate, head home; at the pan, take the next nut if there is one
+  if (dist <= 2) {
+    if (goalX === PLATE_X) { goalX = PAN_X; detour = 0; }
+    else if (pending > 0) { pending--; goalX = PLATE_X; detour = 0; }
+    dist = Math.abs(goalX - bean.x);
+  }
+
+  var dir = goalX > bean.x ? 1 : -1;
+  if (dist > 2) face = dir;
+  var speed = 140;
+  var aimY = HOME_Y;
+  var gap = rock.r + 16;
+
+  // is the rock close, ahead of us (or just beside us), and level with us?
+  var ahead = (rock.x - bean.x) * dir;
+  var between = ahead > -gap && ahead < 90 && (rock.x - goalX) * dir < 0;
+  var level = Math.abs(bean.y - rock.y) < rock.r + 12;
+  if (between && level && detour === 0) {
+    // pick once; if dead level, go underneath
+    detour = (bean.y < rock.y - 1) ? -1 : 1;
+  }
+  if (detour !== 0) {
+    aimY = rock.y + detour * gap;
+    // forget the choice once we're past the rock
+    if (ahead < -gap) { detour = 0; aimY = HOME_Y; }
+  }
+
+  if (dist > 2) bean.x += dir * Math.min(dist, speed * dt);
+  bean.y += (aimY - bean.y) * Math.min(1, dt * 8);
+}
+
+function drawWalk() {
+  w.clearRect(0, 0, 640, 110);
+  // pan and plate
+  w.fillStyle = '#2b231e';
+  w.beginPath(); w.arc(30, HOME_Y, 26, 0, 7); w.fill();
+  w.fillStyle = '#e8e0d0';
+  w.beginPath(); w.ellipse(610, HOME_Y, 26, 22, 0, 0, 7); w.fill();
+  // rock
+  w.fillStyle = '#6f6a63';
+  w.beginPath(); w.arc(rock.x, rock.y, rock.r, 0, 7); w.fill();
+  w.fillStyle = '#8a857d';
+  w.beginPath(); w.arc(rock.x - 5, rock.y - 6, 7, 0, 7); w.fill();
+  // bean: spotted body, folded ears, cloak (flips to face the way he walks)
+  w.save();
+  w.translate(bean.x, bean.y);
+  w.scale(face, 1);
+  w.fillStyle = '#d9a35a';
+  w.beginPath(); w.ellipse(0, 0, 15, 11, 0, 0, 7); w.fill();
+  w.beginPath(); w.arc(9, -6, 9, 0, 7); w.fill();
+  w.fillStyle = '#5a3a1a';
+  w.beginPath(); w.arc(-5, -2, 2.5, 0, 7); w.fill();
+  w.beginPath(); w.arc(2, 3, 2.5, 0, 7); w.fill();
+  w.beginPath(); w.arc(12, -7, 1.5, 0, 7); w.fill();
+  w.fillStyle = '#2f6b3a';
+  w.beginPath(); w.moveTo(-8, -8); w.lineTo(4, -8); w.lineTo(-14, 8); w.closePath(); w.fill();
+  if (goalX === PLATE_X) {   // carrying a nut
+    w.fillStyle = '#a0602c';
+    w.beginPath(); w.ellipse(17, 3, 6, 5, 0, 0, 7); w.fill();
+  }
+  w.restore();
+  // queue count
+  if (pending > 0) {
+    w.fillStyle = '#f1e3c8';
+    w.font = '12px Georgia';
+    w.fillText('waiting: ' + pending, 270, 14);
+  }
+}
+
+var prev = performance.now();
+function loop(now) {
+  var dt = Math.min(0.05, (now - prev) / 1000);
+  prev = now;
+  if (running) {
+    left -= (now - lastTick) / 1000;
+    lastTick = now;
+    if (left <= 0) {
+      left = 0; running = false;
+      goBtn.textContent = 'Start';
+      timerEl.className = 'done';
+      ding();
+    }
+    timerEl.textContent = fmt(left);
+  }
+  walkStep(dt);
+  drawWalk();
+  requestAnimationFrame(loop);
+}
+
+makeGrid();
+show();
+resetTimer();
+checkHeat();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
